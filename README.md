@@ -1,9 +1,1 @@
-- 👋 Hi, I’m @JerryZhao864
-- 👀 I’m interested in Programming and Video Games :)
-- 🌱 I’m currently learning Bachelor of Science (Computing and Software Systems)
-
-
-<!---
-JerryZhao864/JerryZhao864 is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
-You can click the Preview link to take a look at your changes.
---->
+Hi, I'm Jerry, a university student interested in pursuing software development and programming. I'm currently in my second year at University of Melbourne, studying a Bachelor of Science with a Computing and Software Systems major.
