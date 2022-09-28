@@ -66,7 +66,8 @@ async def getChampionSpells(champion, message):
 
 
 async def champMastery(username, user_reg, message):
-    champs = Summoner(name=username, region=user_reg).champion_masteries.filter(lambda cm: cm.level >= 6)
+    masteryLevel = message[-1]
+    champs = Summoner(name=username, region=user_reg).champion_masteries.filter(lambda cm: cm.level >= masteryLevel)
     await message.channel.send(", ".join([cm.champion.name for cm in champs]))
 
 
