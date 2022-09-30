@@ -1,15 +1,18 @@
 # bot.py
 import os
-
+import re
 import cassiopeia
 import discord
-from discord import channel
+from discord.utils import get
+import urllib3
+import json
+from urllib.request import urlopen
 
 import apiHolder  # holds api_key
-
+import random
 from dotenv import load_dotenv
 from riotwatcher import LolWatcher, ApiError
-from cassiopeia import Summoner, Champion, Queue, Match
+from cassiopeia import Summoner, Champion, Champions, Items, Item
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -52,17 +55,70 @@ async def getRankedData(username, user_reg, message):
         await message.channel.send(text)
 
 
-async def getChampionSpells(champion, message):
-    champ = Champion(name=champion, region='NA')
-    champ_image = "http://ddragon.leagueoflegends.com/cdn/img/champion/splash/" + champ.key + "_0.jpg"
-    text = "**" + champ.passive.name + " [PASSIVE]" + "**" + ": " + champ.passive.description + "\n\n"
+async def getItem(itemName, message):
+    item = Item(name=itemName, region='NA')
+    itemImage = getItemURL(item.id)
+    #use regex to remove tags in item description
 
-    for spell in champ.spells:
-        text += "**" + spell.name + " [" + spell.keyboard_key.name + "]" + "**" ": " + spell.description + "\n\n"
+    pattern = r'>([^<]+)<'
+    itemDesc = item.description
+    itemDesc = re.sub("<br>", "\n", itemDesc)
+    itemDesc = re.sub("<li>", "\n", itemDesc)
+    itemDesc = "".join(re.findall(pattern, itemDesc))
+    embed = discord.Embed(title=item.name, description=itemDesc)
+    embed.set_thumbnail(url=itemImage)
+    await message.channel.send(embed=embed)
+
+
+
+
+async def getChampionSpells(champion, message):
+    # instantiate Champion object that holds data of specific champion
+    champ = Champion(name=champion, region='NA')
+    champImage = getChampURL(champ.key)
+
+    passiveImage, passiveKey = getPassiveURL(champ.key)
+    emoji = await createEmoji(message, passiveImage, passiveKey)
+    text = f"{emoji} **{champ.passive.name} [PASSIVE]**: {champ.passive.description} \n\n"
+
+    for ability in champ.spells:
+        abilityImage = getAbilityURL(ability.key)
+        emoji = await createEmoji(message, abilityImage, ability.key)
+        text += f"{emoji} **{ability.name} [{ability.keyboard_key.name}]**: {ability.description} \n\n"
 
     embed = discord.Embed(title=champ.name, description=text)
-    embed.set_image(url=champ_image)
+    embed.set_image(url=champImage)
     await message.channel.send(embed=embed)
+
+
+async def createEmoji(message, URL, key):
+    emoji = get(message.guild.emojis, name=key)
+    if emoji is None:
+        img = urlopen(URL).read()
+        await message.guild.create_custom_emoji(name=key, image=img)
+        emoji = get(message.guild.emojis, name=key)
+
+    return emoji
+
+
+def getChampURL(champ_key):
+    return f"http://ddragon.leagueoflegends.com/cdn/img/champion/splash/{champ_key}_0.jpg"
+
+
+def getPassiveURL(champ_key):
+    http = urllib3.PoolManager()
+    fileLink = f"http://ddragon.leagueoflegends.com/cdn/12.18.1/data/en_US/champion/{champ_key}.json"
+    r = http.request('GET', fileLink, fields={'arg': 'value'})
+    passiveKey = json.loads(r.data.decode('utf-8'))["data"][champ_key]["passive"]["image"]["full"]
+    return "http://ddragon.leagueoflegends.com/cdn/12.18.1/img/passive/" + passiveKey, passiveKey.strip(".png")
+
+
+def getAbilityURL(ability_key):
+    return f"http://ddragon.leagueoflegends.com/cdn/12.18.1/img/spell/{ability_key}.png"
+
+
+def getItemURL(item_key):
+    return f"http://ddragon.leagueoflegends.com/cdn/12.18.1/img/item/{item_key}.png"
 
 
 async def champMastery(username, user_reg, message):
@@ -71,13 +127,78 @@ async def champMastery(username, user_reg, message):
     await message.channel.send(", ".join([cm.champion.name for cm in champs]))
 
 
-async def getBestPlayer(message):
-    # joke
-    embed = discord.Embed(title="Best Player (read: Worst Player)",
-                          description="https://oce.op.gg/summoners/oce/xxtheloneincelxx")
-    file = discord.File("IMG_1608.jpg")
-    embed.set_image(url="attachment://IMG_1608.jpg")
-    await message.channel.send(embed=embed, file=file)
+async def loldle(content, message):
+    def check(message):
+        return message.content.startswith("$guess") or message.content.startswith("$quit")
+
+    tries = 0
+    posLetters = "a b c d e f g h i j k l m n o p q r s t u v w x y z"
+    contentList = getContentList(content)
+    chosenWord = random.choice(contentList)
+    output = ""
+    for char in chosenWord:
+        if char != " ":
+            output += ":white_large_square: "
+        else:
+            output += "  "
+    await message.channel.send(output)
+    print(chosenWord)
+
+    while tries < 5:
+        message = await client.wait_for('message', check=check)
+        guess = message.content.lower()
+        guess = guess.split()
+
+        attempt = guess[1]
+
+        while len(attempt) != len(chosenWord) and attempt != "$quit":
+            if len(attempt) != len(chosenWord):
+                await message.channel.send("Your attempted guess was the incorrect length")
+
+            message = await client.wait_for('message', check=check)
+            guess = message.content.lower()
+            guess = guess.split()
+            attempt = guess[1]
+
+        if attempt == "$quit":
+            await message.channel.send("The game has been aborted")
+            return
+
+        output = ""
+        correctGuess = True
+
+        for i in range(len(chosenWord)):
+            if attempt[i] != chosenWord[i]:
+                correctGuess = False
+                if attempt[i] in chosenWord:
+                    output += ":yellow_square: "
+                else:
+                    # if letter not in chosenWord
+                    output += ":red_square: "
+                    if " " + attempt[i] + " " in posLetters:
+                        posLetters = posLetters.replace(attempt[i], "~~" + attempt[i] + "~~")
+            else:
+                output += ":green_square: "
+
+        await message.channel.send(output + "\n" + posLetters)
+        if correctGuess:
+            break
+        tries += 1
+
+    if correctGuess:
+        await message.channel.send("Congratulations you have guessed the correct word!")
+    else:
+        await message.channel.send("Unfortunately you have not guessed the correct word!")
+
+
+def getContentList(content):
+    if content == "champions":
+        champions = Champions(region="NA")
+        return [champion.name.lower() for champion in champions]
+
+    elif content == "items":
+        items = Items(region="NA")
+        return [item.name.lower() for item in items]
 
 
 @client.event
@@ -85,28 +206,28 @@ async def on_message(message):
     if message.author == client.user:
         return
 
+    contentList = message.content.split(' ')
+
     if message.content.startswith('$ranked'):
-        contentList = message.content.split(' ')
         await getRankedData(" ".join(contentList[1:-1]), contentList[2], message)
 
-        # print(output)
-        # if output:
-        #     newList = "\n".join(output)
-        #     await message.channel.send(newList)
-        # else:
-        #     print(" ".join(contentList[1:-1]))
-        #     await message.channel.send((" ".join(contentList[1:-1]) + 'has not played enough games'))
-
     elif message.content.startswith("$champ"):
-        contentList = message.content.split(' ')
-        await getChampionSpells(contentList[1], message)
-
-    elif message.content.startswith("$bestplayer"):
-        await getBestPlayer(message)
+        try:
+            await getChampionSpells(" ".join(contentList[1:]), message)
+        except IndexError:
+            await message.channel.send("The command did not have the right number of arguments")
 
     elif message.content.startswith("$mastery"):
-        contentList = message.content.split(' ')
-        await champMastery(" ".join(contentList[1:-1]), contentList[2], message)
+        try:
+            await champMastery(" ".join(contentList[1:-1]), contentList[2], contentList[3], message)
+        except IndexError:
+            await message.channel.send("The command did not have the right number of arguments")
+
+    elif message.content.startswith("$loldle"):
+        await loldle(contentList[1], message)
+
+    elif message.content.startswith("$item"):
+        await getItem(" ".join(contentList[1:]), message)
 
 
 client.run(TOKEN)
